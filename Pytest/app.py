@@ -1,0 +1,7 @@
+import requests
+
+
+def get_json(url):
+    """Takes a URL, and returns the JSON."""
+    r = requests.get(url)
+    return r.json()
