@@ -49,10 +49,9 @@ try:
     for subindex in obj:
         print(f"Subindex {subindex}: {obj[subindex].raw}")
 
-    
 
 
-
+    node.sdo.download(0x1012, 0, b'\x00\x00')
 
 
 except Exception as e:
