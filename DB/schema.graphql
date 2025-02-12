@@ -1,0 +1,28 @@
+ schema {
+    query: Query
+}
+
+type Person {
+    personID: ID!
+    lastname: String!
+    firstname: String!
+    address: String!
+    city: String!
+}
+
+type PersonResult {
+    success: Boolean!
+    errors: [String]
+    post: Post
+}
+
+type PersonsResult {
+    success: Boolean!
+    errors: [String]
+    post: [Post]
+}
+
+type Query {
+    listPosts: PersonResult!
+    getPost(personID: ID!): PersonsResult!
+}
