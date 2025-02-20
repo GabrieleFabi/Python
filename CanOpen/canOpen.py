@@ -48,10 +48,15 @@ try:
     # Print the content of the object dictionary entry
     for subindex in obj:
         print(f"Subindex {subindex}: {obj[subindex].raw}")
+        
+        
+    node.sdo.download(0x6042, 0, b'\x00\x00')
+    node.sdo.upload(0x6042, 0)
 
+    # Access the Data Type variable inside the message with index 0x6043
+    data_type_obj = node.sdo[0x6043]
 
-
-    node.sdo.download(0x1012, 0, b'\x00\x00')
+    # Print the content of the Data Type variable
 
 
 except Exception as e:
