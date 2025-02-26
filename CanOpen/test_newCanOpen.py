@@ -98,7 +98,7 @@ class TestCANopen(unittest.TestCase):
 
     def _check_acces(self, acces: str, index, subindex=None, value=b'\x00\x00') -> bool:
         if acces == 'wo':
-            return self.is_writable(index, subindex, value) and not (self.is_readable(index, subindex))     
+            return self._check_writeable(index, subindex, value) and not (self._check_readable(index, subindex))     
         elif acces == 'ro' or acces == 'const':
             return self._check_readOnly(index, subindex, value)
         elif acces == 'rw':
@@ -220,10 +220,14 @@ class TestCANopen(unittest.TestCase):
         except canopen.SdoAbortedError as e:
             error_code = f"Code 0x{e.code:08X}"
             return False
-
-            
+        
 
     #set up the Check functions 
+
+    @check.check_func
+    def is_present(self, index, subindex=0):
+        if not (self._check_upload(index, subindex) or self._check_download(index, subindex)):
+            warnings.warn(UserWarning(f"Index {index} is not in EDS."))
 
     @check.check_func
     def is_readonly(self, index, subindex=None, value=b'\x00\x00'):
@@ -294,6 +298,7 @@ class TestCANopen(unittest.TestCase):
     #start the tests for mandatory objects
     
     def test_1000(self):
+        self.is_present(0x1000)
         self.is_variable(0x1000, DT=DataType.UNSIGNED32.value)
         self.is_readonly(0x1000, value=b'\x00\x00')
 
@@ -302,23 +307,37 @@ class TestCANopen(unittest.TestCase):
         self.is_variable(0x1001, DT=DataType.UNSIGNED8.value)
 
     def test_1018(self):
-        self.is_readonly(0x1018, 0, b'\x00\x00')
+        self.is_readonly(0x1018, 0, b'\x00')
         self.is_variable(0x1018, 0, DataType.UNSIGNED8.value)
-        self.is_readonly(0x1018, 1, b'\x00\x00')
+        self.is_readonly(0x1018, 1, b'\x00\x00\x00\x00')
         self.is_variable(0x1018, 1, DataType.UNSIGNED32.value)
         
     def test_1021(self):
-        self.is_readonly(0x1021, value=b'\x00\x00') 
+        self.is_readonly(0x1021, value=b'stringa') 
         self.is_string(0x1021, DT=DataType.VISIBLE_STRING.value) 
 
 
     #start test for optional objects
 
     def test_6040(self):
-        self.is_variable(0x6040, DT=DataType.UNSIGNED16.value)
         self.is_readwrite(0x6040, value=b'\x00\x00')
+        self.is_variable(0x6040, DT=DataType.UNSIGNED16.value)
+        
     
-    
+    def test_6049(self):
+        self.is_readonly(0x6049, 0, b'\x00')
+        self.is_variable(0x6049, 0, DataType.UNSIGNED8.value)
+        self.is_readwrite(0x6049, 1, b'\x00\x00\x00\x00')
+        self.is_variable(0x6049, 1, DataType.UNSIGNED32.value)
+        self.is_readwrite(0x6049, 2, b'\x00\x00')
+        self.is_variable(0x6049, 2, DataType.UNSIGNED16.value)
+
+    def test_1002(self):
+        self.is_present(0x1002)
+
+    def test_1015(self): #passa ma triggera un warning
+        self.is_present(0x1015)
+        
         
 if __name__ == '__main__':
     unittest.main()

@@ -51,7 +51,7 @@ try:
         
         
     node.sdo.download(0x6042, 0, b'\x00\x00')
-    node.sdo.upload(0x6042, 0)
+    n = node.sdo.upload(0x1015, 0)
 
     
 
