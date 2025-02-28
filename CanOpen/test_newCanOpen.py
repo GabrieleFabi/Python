@@ -168,7 +168,7 @@ class TestCANopen(unittest.TestCase):
             if sizes == [check]:
                 return True
             elif check in sizes and len(sizes) > 1:
-                warnings.warn(UserWarning, f"Sizes contain {check} but also other values.")
+                warnings.warn(f"Sizes contain {check} but also other values.", UserWarning)
                 return True
             elif check not in sizes:
                 return False
@@ -222,12 +222,59 @@ class TestCANopen(unittest.TestCase):
             return False
         
 
-    #set up the Check functions 
+    def exists_on_device(self, index: int, subindex=0) -> bool:
+        
+        try:
+            self.node.sdo.upload(index, subindex)
+            return True
+        except canopen.SdoAbortedError as e:
+            error_code = f"Code 0x{e.code:08X}"
+            return False
+    
+    
+    def exists_in_od(self, index: int, subindex=0) -> bool:
+        return self.node.object_dictionary.get_variable(index, subindex) is not None
+        
+    def exists(self, index: int, subindex=0) -> bool:
 
-    @check.check_func
-    def is_present(self, index, subindex=0):
-        if not (self._check_upload(index, subindex) or self._check_download(index, subindex)):
-            warnings.warn(UserWarning(f"Index {index} is not in EDS."))
+        device = self.exists_on_device(index, subindex)
+        od = self.exists_in_od(index, subindex)
+
+        match (device, od):
+            case (True, True):
+                return True
+            case (False, True):
+                warnings.warn(f"Index 0x{hex(index)} is not in the device.", UserWarning)
+                return False
+            case (True, False):
+                warnings.warn(f"Index 0x{hex(index)} is not in s/oD/OD.", UserWarning)
+                return False
+            case (False, False):
+                return False
+            
+    def _test_obj(self, index, subindex=None):
+        obj = self.node.object_dictionary.get_variable(index, subindex=0)
+        if isinstance(obj, ODVariable): 
+            if self.exists(index, subindex):
+                match obj.access_type:
+                    case "rw":
+                        self.is_readwrite(index, subindex)
+                    case "ro" | "const":
+                        self.is_readonly(index, subindex)
+
+                self.has_datatype(index, subindex, obj.data_type)
+
+                if obj.max:
+                    check.less_equal(obj.raw, obj.max)
+
+                if obj.min:
+                    check.greater_equal(obj.raw, obj.min)
+        elif isinstance(obj, ODArray):
+            pass
+        elif isinstance(obj, ODRecord):
+            pass
+
+    #set up the Check functions 
 
     @check.check_func
     def is_readonly(self, index, subindex=None, value=b'\x00\x00'):
@@ -246,98 +293,280 @@ class TestCANopen(unittest.TestCase):
 
 
     @check.check_func
-    def is_variable(self, index, subindex=None, DT=None):
+    def has_datatype(self, index: int, subindex=None, DT=None):
 
         if DT is None:
-            warnings.warn(UserWarning, "Data type not specified.")
+            warnings.warn("Data type not specified.", UserWarning)
 
-        if DT in (0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x0F, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19):
-
+        if DT in (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0A, 0x0B, 0x0F, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19):
             if self._check_datatype(index, subindex, DT):
                 assert True
             else:
-                assert self._check_datatype_od(index, subindex, DT)                       
+                assert self._check_datatype_od(index, subindex, DT)
         else:
             assert False
             
 
-    @check.check_func
-    def is_bool(self, index, subindex=None, DT=None):
-
-        if DT is None:
-            warnings.warn(UserWarning, "Data type not specified.")
-
-        if DT is 0x01:
-            assert self._check_datatype_od(index, subindex, DT)
-        else:
-            assert False
-
-    @check.check_func
-    def is_string(self, index, subindex=None, DT=None):
-
-        if DT is None:
-            warnings.warn(UserWarning, "Data type not specified.")
-
-        if DT in (0x09, 0x0A, 0x0B):
-
-            if self._check_datatype(index, subindex, DT):
-                assert True
-            else:
-                assert self._check_datatype_od(index, subindex, DT) 
-        else:
-            assert False
-
-
-
-    #start the debug tests
-
-    def test_download(self):
-        self.assertTrue(self._check_download(0x6040)) #might have issues with indexes
-   
-
     #start the tests for mandatory objects
     
-    def test_1000(self):
-        self.is_present(0x1000)
-        self.is_variable(0x1000, DT=DataType.UNSIGNED32.value)
-        self.is_readonly(0x1000, value=b'\x00\x00')
-
-    def test_1001(self):
-        self.is_readonly(0x1001, value=b'\x00\x00')
-        self.is_variable(0x1001, DT=DataType.UNSIGNED8.value)
-
-    def test_1018(self):
-        self.is_readonly(0x1018, 0, b'\x00')
-        self.is_variable(0x1018, 0, DataType.UNSIGNED8.value)
-        self.is_readonly(0x1018, 1, b'\x00\x00\x00\x00')
-        self.is_variable(0x1018, 1, DataType.UNSIGNED32.value)
+    def test_0x1000(self):
+        if self.exists(0x1000):
+            self.has_datatype(0x1000, DT=DataType.UNSIGNED32.value)
+            self.is_readonly(0x1000, value=b'\x00\x00')
+        else:
+            assert False
         
-    def test_1021(self):
-        self.is_readonly(0x1021, value=b'stringa') 
-        self.is_string(0x1021, DT=DataType.VISIBLE_STRING.value) 
+
+    def test_0x1001(self):
+        if self.exists(0x1001):
+            self.is_readonly(0x1001, value=b'\x00\x00')
+            self.has_datatype(0x1001, DT=DataType.UNSIGNED8.value)
+        else:
+            assert False
+
+    def test_0x1018(self):
+        if self.exists(0x1018):
+            self.is_readonly(0x1018, 0, b'\x00\x00\x00')
+            self.has_datatype(0x1018, 0, DataType.UNSIGNED8.value)
+
+            if self.exists(0x1018, 1):
+                self.is_readonly(0x1018, 1, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1018, 1, DataType.UNSIGNED32.value)
+            else:
+                assert False
+
+        else:
+            assert False    
+        
+    def test_0x1021(self):
+        if self.exists(0x1021):
+            self.is_readonly(0x1021, value=b'stringa')
+            self.has_datatype(0x1021, DT=DataType.VISIBLE_STRING.value)
+        else:
+            assert False
 
 
     #start test for optional objects
 
-    def test_6040(self):
-        self.is_readwrite(0x6040, value=b'\x00\x00')
-        self.is_variable(0x6040, DT=DataType.UNSIGNED16.value)
-        
+    def test_0x1002(self):
+        if self.exists(0x1002):
+            self.is_readonly(0x1002, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1002, DT=DataType.UNSIGNED32.value)
+        else:
+            warnings.warn("Index 0x1002 is missing", UserWarning)
+            
+
+    def test_0x1003(self):
+        if self.exists(0x1003):
+            self.is_readwrite(0x1003, 0, b'\x00')
+            self.has_datatype(0x1003, 0, DataType.UNSIGNED8.value)
+            try:
+                self.node.sdo[0x1003][0].raw = 1
+                assert False
+            except canopen.SdoAbortedError as error:
+                check.equal(error.code, 0x06090030)
+
+            if self.exists(0x1003, 1):
+                self.is_readonly(0x1003, 1, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1003, 1, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1003, subindex 1 is missing", UserWarning)
+            
+            if self.exists(0x1003, 2):
+                self.is_readonly(0x1003, 2, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1003, 2, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1003, subindex 2 is missing", UserWarning)
+        else:
+            assert False
     
-    def test_6049(self):
-        self.is_readonly(0x6049, 0, b'\x00')
-        self.is_variable(0x6049, 0, DataType.UNSIGNED8.value)
-        self.is_readwrite(0x6049, 1, b'\x00\x00\x00\x00')
-        self.is_variable(0x6049, 1, DataType.UNSIGNED32.value)
-        self.is_readwrite(0x6049, 2, b'\x00\x00')
-        self.is_variable(0x6049, 2, DataType.UNSIGNED16.value)
+    def test_0x1004(self):
+        if self.exists(0x1004):
+            warnings.warn("Index 0x1004 is a reserved entry", UserWarning)
+        else:
+            warnings.warn("Index 0x1004 is missing", UserWarning)
 
-    def test_1002(self):
-        self.is_present(0x1002)
+    def test_0x1005(self):
+        if self.exists(0x1005):
+            self.is_readwrite(0x1005, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1005, DT=DataType.UNSIGNED32.value)
+        else:
+            warnings.warn("Index 0x1005 is missing", UserWarning)
 
-    def test_1015(self): #passa ma triggera un warning
-        self.is_present(0x1015)
+    def test_0x1006(self):
+        if self.exists(0x1006):
+            self.is_readwrite(0x1006, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1006, DT=DataType.UNSIGNED32.value)
+        else:
+            warnings.warn("Index 0x1006 is missing", UserWarning)
+    
+    def test_0x1007(self):
+        if self.exists(0x1007):
+            self.is_readwrite(0x1007, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1007, DT=DataType.UNSIGNED32.value)
+        else:    
+            warnings.warn("Index 0x1007 is missing", UserWarning)
+
+    def test_0x1008(self):
+        if self.exists(0x1008):
+            self.is_readonly(0x1008, value=b'stringa')
+            self.has_datatype(0x1008, DT=DataType.VISIBLE_STRING.value)
+        else:
+            warnings.warn("Index 0x1008 is missing", UserWarning)
+    
+    def test_0x1009(self):
+        if self.exists(0x1009):
+            self.is_readonly(0x1009, value=b'stringa')
+            self.has_datatype(0x1009, DT=DataType.VISIBLE_STRING.value)
+        else:
+            warnings.warn("Index 0x1009 is missing", UserWarning)
+
+    def test_0x100A(self):
+        if self.exists(0x100A):
+            self.is_readonly(0x100A, value=b'stringa')
+            self.has_datatype(0x100A, DT=DataType.VISIBLE_STRING.value)
+        else:
+            warnings.warn("Index 0x100A is missing", UserWarning)
+
+    def test_0x100B(self):
+        if self.exists(0x100B):
+            warnings.warn("Index 0x100B is a reserved entry", UserWarning)
+        else:
+            warnings.warn("Index 0x100B is missing", UserWarning)
+    
+    def test_0x100C(self):
+        if self.exists(0x100C):
+            self.is_readwrite(0x100C, value=b'\x00\x00')
+            self.has_datatype(0x100C, DT=DataType.UNSIGNED16.value)
+        else:
+            warnings.warn("Index 0x100C is missing", UserWarning)
         
+    def test_0x100D(self):
+        if self.exists(0x100D):
+            self.is_readwrite(0x100D, value=b'\x00')
+            self.has_datatype(0x100D, DT=DataType.UNSIGNED8.value)
+        else:
+            warnings.warn("Index 0x100D is missing", UserWarning)
+    
+    def test_0x100E(self):
+        if self.exists(0x100E):
+            warnings.warn("Index 0x100E is a reserved entry", UserWarning)
+        else:
+            warnings.warn("Index 0x100E is missing", UserWarning)
+    
+    def test_0x100F(self):
+        if self.exists(0x100F):
+            warnings.warn("Index 0x100F is a reserved entry", UserWarning)
+        else:
+            warnings.warn("Index 0x100F is missing", UserWarning)
+    
+    def test_0x1010(self): #error 80000020 l'index ritorna sempre errore
+        if self.exists(0x1010): 
+            self.is_readonly(0x1010, 0, b'\x00\x00\x00\x00')
+            self.has_datatype(0x1010, 0, DataType.UNSIGNED8.value)
+
+            if self.exists(0x1010, 1):
+                #self.is_readwrite(0x1010, 1, b'\x65\x76\x61\x73')
+                self.has_datatype(0x1010, 1, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1010, subindex 1 is missing", UserWarning)
+
+            if self.exists(0x1010, 2):
+                #self.is_readwrite(0x1010, 2, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1010, 2, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1010, subindex 2 is missing", UserWarning)
+
+            if self.exists(0x1010, 3):
+                #self.is_readwrite(0x1010, 3, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1010, 3, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1010, subindex 3 is missing", UserWarning)
+        else:
+            warnings.warn("Index 0x1010 is missing", UserWarning)
+
+    def test_0x1011(self): #error 80000020 l'index ritorna sempre errore
+        if self.exists(0x1011):
+            #self.is_readonly(0x1011, 0, b'\x00')
+            self.has_datatype(0x1011, 0, DataType.UNSIGNED8.value)
+
+            if self.exists(0x1011, 1):
+                #self.is_readwrite(0x1011, 1, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1011, 1, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1011, subindex 1 is missing", UserWarning)
+
+            if self.exists(0x1011, 2):
+                #self.is_readwrite(0x1011, 2, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1011, 2, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1011, subindex 2 is missing", UserWarning)
+
+            if self.exists(0x1011, 3):
+                #self.is_readwrite(0x1011, 3, b'\x00\x00\x00\x00')
+                self.has_datatype(0x1011, 3, DataType.UNSIGNED32.value)
+            else:
+                warnings.warn("Index 0x1011, subindex 3 is missing", UserWarning)
+        else:
+            assert False
+    
+    def test_0x1012(self):
+        if self.exists(0x1012):
+            self.is_readwrite(0x1012, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1012, DT=DataType.UNSIGNED32.value)
+        else:
+            warnings.warn("Index 0x1012 is missing", UserWarning)
+    
+    def test_0x1013(self):
+        if self.exists(0x1013):
+            self.is_readwrite(0x1013, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1013, DT=DataType.UNSIGNED32.value)
+        else:
+           warnings.warn("Index 0x1013 is missing", UserWarning)
+
+    def test_0x1014(self):
+        if self.exists(0x1014):
+            self.is_readwrite(0x1014, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1014, DT=DataType.UNSIGNED32.value)
+        else:
+            warnings.warn("Index 0x1014 is missing", UserWarning)
+
+    def test_0x1015(self):
+        if self.exists(0x1015):
+            self.is_readonly(0x1015, value=b'\x00\x00')
+            self.has_datatype(0x1015, DT=DataType.UNSIGNED16.value)
+        else:
+            warnings.warn("Index 0x1015 is missing", UserWarning)
+
+    def test_0x1016(self):
+        if self.exists(0x1016):
+            self.is_readwrite(0x1016, value=b'\x00\x00\x00\x00')
+            self.has_datatype(0x1016, DT=DataType.UNSIGNED32.value)
+        else:
+            warnings.warn("Index 0x1016 is missing", UserWarning)   
+
+    def test_0x1017(self):
+        if self.exists(0x1017):
+            self.is_readwrite(0x1017, value=b'\x00\x00')
+            self.has_datatype(0x1017, DT=DataType.UNSIGNED16.value)
+        else:
+            warnings.warn("Index 0x1017 is missing", UserWarning)
+
+    #start test for looped objects
+
+    def test_0x1022_to_0x11ff(self):
+        for index in range(0x1019, 0x1020):
+            check.is_false(self.exists(index))
+
+        for index in range(0x1022, 0x11FF):
+            check.is_false(self.exists(index))
+
         
+    #start tests from OD
+
+    def test_general_test(self):
+        self._test_obj(0x1000)
+    
+
 if __name__ == '__main__':
     unittest.main()
