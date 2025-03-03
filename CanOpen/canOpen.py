@@ -27,8 +27,11 @@ try:
     node = network.add_node(113, 'C:/Users/g.fabi/Test/CanOpen/eds_data.eds')
     network.send_message(0x18BC7148, b'CAN OPEN') #messaggio per cambiare protocollo di comunicazione
 
-    obj = node.object_dictionary[0x1000]
-    print(obj)
+    obj = node.sdo[0x6040]
+
+    obj.raw = 0x11
+    print(obj.raw)
+
 
 except Exception as e:
     print(f"An error occurred: {e}")
