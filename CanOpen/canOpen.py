@@ -21,7 +21,7 @@ try:
     # This will attempt to read an SDO from nodes 1 - 127
     network.scanner.search()
     # We may need to wait a short while here to allow all nodes to respond
-
+    time.sleep(5)
    
 
     node = network.add_node(113, 'C:/Users/g.fabi/Test/CanOpen/eds_data.eds')
