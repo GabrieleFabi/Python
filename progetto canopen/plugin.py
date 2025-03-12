@@ -27,7 +27,6 @@ def pytest_addoption(parser):
         default=0x2000,
         help="index of the first message to be sent, default is 0x2000, this value is included"
     )
-
     parser.addoption(
         "--node-id",
         action="store",
@@ -35,32 +34,27 @@ def pytest_addoption(parser):
         default=113,
         help="id of the node to add to the network, default is setted to 113"
     )
-
     parser.addoption(
         "--flash",
         action="store_true",
         help="flash the master and the slave"
     )
-
     parser.addoption(
-        "--fm",
+        "--m",
         action="store",
         type=str,
         default="",
         help="insert the interface, default is setted to empty"
     )
-
     parser.addoption(
-        "--fs",
+        "--s",
         action="store",
         type=str,
         default="",
         help="insert the interface, default is setted to kvaser"
     )
-
     parser.addoption(
         "--reboot",
         action="store_true",
         help="reboot the inverter"
     )
-    

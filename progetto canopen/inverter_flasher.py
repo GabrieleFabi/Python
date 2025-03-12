@@ -4,6 +4,10 @@ import time
 import sys
 import serial.tools.list_ports
 import os
+import warnings
+
+cmd_path = 'cd C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin'
+cmd_program = '.\\STM32_Programmer_CLI.exe -c port=SWD -w'
 
 # Messages
 silent_message = bytearray([0x90, 0x01, 0x00, 0x91, 0x01])
@@ -34,14 +38,14 @@ def send_command_and_receive_result(command, serial_port):
         return False  # Errore
 
 # Flash firmware on master
-def flash_master(firmware_master, serial_port):
+def flash_master(firmware_master_path, serial_port):
     command = master_message
     result = send_command_and_receive_result(command, serial_port)  # Select master
     if not result:
         return False
     time.sleep(1)  # Wait for the end of selection
     try:
-        os.system(f' "cd C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin & .\\STM32_Programmer_CLI.exe -c port=SWD -w {firmware_master} 0x08000000"')  #Flashing
+        os.system(f' "{cmd_path} & {cmd_program} {firmware_master_path} 0x08000000"')  #Flashing
         reboot_micros(serial_port)  # Restart after the flashing
         return True
     except Exception as e:
@@ -49,34 +53,19 @@ def flash_master(firmware_master, serial_port):
         return False
     
 # Flash firmware on slave
-def flash_slave(firmware_slave, serial_port):
+def flash_slave(firmware_slave_path, serial_port):
     command = slave_message
     result = send_command_and_receive_result(command, serial_port)  # Select master
     if not result:
         return False
     time.sleep(1)  # Wait for the end of selection
     try:
-        os.system(f' "cd C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin & .\\STM32_Programmer_CLI.exe -c port=SWD -w {firmware_slave} 0x08000000"')  #Flashing
+        os.system(f' "{cmd_path} & {cmd_program} {firmware_slave_path} 0x08000000"')  #Flashing
         reboot_micros(serial_port)  # Restart after the flashing
         return True
     except Exception as e:
         print(f"Error during flashing on master: {e}.")
         return False
-
-# Flash firmware on both master and slave
-def flash_master_and_slave(firmware_master, firmware_slave, serial_port):
-
-    # Flash firmware on master
-    result_master = flash_master(firmware_master, serial_port)
-    if not result_master:
-        return False
-
-    # Flash firmware on slave
-    result_slave = flash_slave(firmware_slave, serial_port)
-    if not result_slave:
-        return False
-
-    return True
 
 # Set inhibit
 def inhibit(serial_port):
@@ -135,32 +124,19 @@ def find_stlink_port():
 # Parser of args
 def main():
     parser = argparse.ArgumentParser(description="Script to manage the flashing and reboot of the inverter.")
-    parser.add_argument("-m", "--master", help="Flash firmware on master.", action="store_true")
-    parser.add_argument("-s", "--slave", help="Flash firmware on slave.", action="store_true")
-    parser.add_argument("-b", "--both", help="Flash firmware both on master and slave.", action="store_true")
     parser.add_argument("-i", "--inhibit", help="Set inhibition.", action="store_true")
     parser.add_argument("-o", "--turnoff", help="Turn off inverter.", action="store_true")
     parser.add_argument("-n", "--turnon", help="Turn on inverter.", action="store_true")
     parser.add_argument("-r", "--reboot", help="Reboot inverter.", action="store_true")
-    parser.add_argument("-fm", "--firmware_master", help="Path of master firmware.", type=str)
-    parser.add_argument("-fs", "--firmware_slave", help="Path of slave firmware.", type=str)
+    parser.add_argument("-m", "--master", help="Path of master firmware.", type=str)
+    parser.add_argument("-s", "--slave", help="Path of slave firmware.", type=str)
     parser.add_argument("-p", "--port", help="Serial port (e.g. COM5 or /dev/ttyUSB0). If not specified the port will be found automatically.", type=str)
 
     args = parser.parse_args()
 
     # Check if at least one operation is executed
-    if not (args.master or args.slave or args.both or args.inhibit or args.turnoff or args.turnon or args.reboot):
+    if not (args.master or args.slave or args.inhibit or args.turnoff or args.turnon or args.reboot):
         print("Errore: nessuna azione selezionata.")
-        return False
-
-    # Check if firmware path is specified when trying to flash on master
-    if args.master and not args.firmware_master:
-        print("Error: master's firmware path must be specified in the option -fm.")
-        return False
-
-    # Check if firmware path is specified when trying to flash on master
-    if args.slave and not args.firmware_slave:
-        print("Error: slave's firmware path must be specified in the option -fs.")
         return False
 
     # If port is not specified, it will be found automatically
@@ -172,23 +148,21 @@ def main():
 
     # Check if flashing on master is requested
     if args.master:
-        result = flash_master(args.firmware_master, args.port)
+        firmware_master_path = os.path.abspath(args.master)
+        if not os.path.exists(firmware_master_path):
+            warnings.warn("path del master non trovato")
+            return False
+        result = flash_master(firmware_master_path, args.port)
         if not result:
             return False
 
     # Check if flashing on slave is requested
     if args.slave:
-        result = flash_slave(args.firmware_slave, args.port)
-        if not result:
+        firmware_slave_path = os.path.abspath(args.slave)
+        if not os.path.exists(firmware_slave_path):
+            warnings.warn("path del master non trovato")
             return False
-        
-    # Check if both slave and master flashings are requested
-    if args.both:
-        if not args.firmware_master or not args.firmware_slave:
-            print("Error: you must specify both master's and slave's firmware paths with --firmware_master e --firmware_slave.")
-            return False
-
-        result = flash_master_and_slave(args.firmware_master, args.firmware_slave, args.port)
+        result = flash_slave(firmware_slave_path, args.port)
         if not result:
             return False
 
