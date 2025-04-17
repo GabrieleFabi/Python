@@ -189,11 +189,10 @@ class Support:
                 obj.raw = value
             else:
                 obj[subindex].raw = value
+            
+            self.reset_value(obj.index, None if isinstance(obj, canopen.sdo.SdoVariable) else obj.subindex, value)
         except canopen.SdoAbortedError as e:
             error_code = f"Code 0x{e.code:08X}"
-            if e.code != 0x06010002:
-                warnings.warn(
-                f"FAILED TEST - READ ONLY: {hex(index)}.{subindex} isn't a Read Only", UserWarning)
             return 0x06010002 == e.code
 
         return False
@@ -207,8 +206,7 @@ class Support:
             else:
                 obj[subindex].raw = value
             return True
-        except canopen.SdoAbortedError as e:
-            error_code = f"Code 0x{e.code:08X}"
+        except Exception as e:
             return False
 
     def _r(self, index, subindex=None) -> bool:
@@ -225,13 +223,13 @@ class Support:
 
     def _access(self, acces: str, index, subindex=None, value=b'\x00\x00\x00\x00') -> bool:
         if acces == 'wo':
-            if not self._w(index, subindex, value) and not (self._r(index, subindex)):
+            if not self._w(index, subindex, value) or (self._r(index, subindex)):
                 assert False, f"FAILED TEST - WRITE ONLY: {hex(index)}.{subindex} isn't a Write Only"
         elif acces == 'ro' or acces == 'const':
             if not self._ro(index, subindex, value):
-                assert False, f"FAILED TEST - READ ONLY: {hex(index)}.{subindex} isn't a Read Only"
+                assert False, f"FAILED TEST - READ ONLY: {hex(index)}.{subindex} didn't return the expected Read Only error 0x06010002"
         elif acces == 'rw':
-            if not self._w(index, subindex, value) and self._r(index, subindex):
+            if not self._w(index, subindex, value) or not self._r(index, subindex):
                 assert False, f"FAILED TEST - READ & WRITE: {hex(index)}.{subindex} isn't a Read & Write"
 
     def _size(self, index, subindex) -> List[int]:
@@ -356,17 +354,6 @@ class Support:
             case (False, False):
                 return False
 
-    def arr_type(self, obj):
-        if isinstance(obj, ODArray):
-            for idx, item in enumerate(obj):
-                if idx == 0:
-                    self.has_datatype_arr(obj[item].index, obj[item].subindex, DataType.UNSIGNED8.value)
-                else:
-                    self.has_datatype_arr(obj[item].index, obj[item].subindex, obj[1].data_type)
-
-        else:
-            assert False, f"FAILED TEST - ARRAY: {hex(obj.index)} is not an array"
-
     def arr_cnt(self, obj):
         expected_length = len(obj)-1
         if isinstance(obj, ODArray):
@@ -379,6 +366,34 @@ class Support:
             assert False, f"FAILED TEST - ARRAY: {hex(obj.index)} is not an array."
 
 
+    @check.check_func
+    def array_check(self, obj):
+        if isinstance(obj, ODArray):
+            self.arr_cnt(obj) #check the number of elements in the array
+
+            for idx, item in enumerate(obj): #check the datatype of the elements in the array from the device
+                if obj[item].access_type == "rw":
+                    value = self.get_value(obj[item].index, None if isinstance(obj[item], canopen.sdo.SdoVariable) else obj[item].subindex)
+                    if idx == 0:
+                        self.has_datatype_arr_device(obj[item].index, obj[item].subindex, DataType.UNSIGNED8.value)
+                    else:
+                        self.has_datatype_arr_device(obj[item].index, obj[item].subindex, obj[1].data_type)
+
+                    self.reset_value(obj[item].index, None if isinstance(obj[item], canopen.sdo.SdoVariable) else obj[item].subindex, value)
+                
+            data_types = set()
+            for idx, item in enumerate(obj): #check the datatype of the elements in the array from the OD
+                    if idx == 0:
+                        self.has_datatype_arr_od(obj[item].index, obj[item].subindex, DataType.UNSIGNED8.value)
+                    else:
+                        data_types.add(obj[item].data_type)               
+
+            if len(data_types) > 1:
+                assert False, f"FAILED TEST - DATATYPE: {hex(obj.index)}: The elements of the array have different datatypes: {data_types} (from OD)"
+
+        else:
+            assert False, f"FAILED TEST - ARRAY: {hex(obj.index)} is not an array"
+
     def test_od(self, obj):
         if isinstance(obj, ODVariable):
             if self.exists(obj.index, obj.subindex):
@@ -390,21 +405,15 @@ class Support:
                     case "rw":
                         self.is_rw(obj.index, obj.subindex, value)
                     case "ro" | "const":
-                        self.is_ro(obj.index, obj.subindex)
+                        self.is_ro(obj.index, obj.subindex, value)
 
                 self.has_datatype(obj.index, obj.subindex, obj.data_type)
 
                 if obj.max is not None:
-                    if value > obj.max:
-                        warnings.warn(
-                            f"FAILED TEST - MIN/MAX: {hex(obj.index)}.{obj.subindex}: value out of bounds, greater than {obj.max}")
-                    check.less_equal(value, obj.max)
+                    check.less_equal(value, obj.max, f"FAILED TEST - MIN/MAX: {hex(obj.index)}.{obj.subindex}: value {value} out of bounds, greater than {obj.max}")
 
                 if obj.min is not None:
-                    if value < obj.min:
-                        warnings.warn(
-                            f"FAILED TEST - MIN/MAX: {hex(obj.index)}.{obj.subindex}: value out of bounds, less than {obj.min}")
-                    check.greater_equal(value, obj.min)
+                    check.greater_equal(value, obj.min, f"FAILED TEST - MIN/MAX: {hex(obj.index)}.{obj.subindex}: value {value} out of bounds, less than {obj.min}")
 
                 if obj.access_type == "rw":
                     self.reset_value(obj.index, None if isinstance(nodeIndex, canopen.sdo.SdoVariable) else obj.subindex, value)
@@ -415,8 +424,7 @@ class Support:
             for item in obj:
                 self.test_od(obj[item])
 
-            self.arr_type(obj)
-            self.arr_cnt(obj)
+            self.array_check(obj)
             
         elif isinstance(obj, ODRecord):
             for item in obj:              
@@ -454,29 +462,43 @@ class Support:
             else:
                 assert False, f"FAILED TEST - DATATYPE: {hex(index)}.{subindex} has the wrong datatype"
         else:
-            assert False, f"FAILED TEST - DATATYPE: {hex(index)}.{subindex} the datatype is not supported"
+            assert False, f"FAILED TEST - DATATYPE: {hex(index)}.{subindex} the datatype {DT} is not supported"
+
 
     @check.check_func
-    def has_datatype_arr(self, index: int, subindex=None, DT=None):
-
+    def has_datatype_arr_device(self, index: int, subindex=None, DT=None):
         if DT is None:
             warnings.warn("Data type not specified.", UserWarning)
 
         if DT in (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0A, 0x0B, 0x0F, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19):
             if self._datatype(index, subindex, DT):
                 assert True
-            elif self._datatype_od(index, subindex, DT):
+            else:
+                assert False, f"FAILED TEST - DATATYPE: {hex(index)}: The elements of the array don't have the same datatype, {DT} expected (from DEVICE)" 
+        else:
+            assert False, f"FAILED TEST - DATATYPE: {hex(index)}.{subindex} the datatype is not supported"
+
+    @check.check_func
+    def has_datatype_arr_od(self, index: int, subindex=None, DT=None):
+        if DT is None:
+            warnings.warn("Data type not specified.", UserWarning)
+
+        if DT in (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0A, 0x0B, 0x0F, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19):
+            if self._datatype_od(index, subindex, DT):
                 assert True
             else:
-                assert False, f"FAILED TEST - DATATYPE: {hex(index)}: The elements of the array don't have the same datatype"
+                assert False, f"FAILED TEST - DATATYPE: {hex(index)}: The elements of the array don't have the same datatype, {DT} expected (from OD)" 
         else:
             assert False, f"FAILED TEST - DATATYPE: {hex(index)}.{subindex} the datatype is not supported"
 
     def get_value(self, index, subindex):
-        if subindex is None:
-            return self.node.sdo[index].raw
-        else:
-            return self.node.sdo[index][subindex].raw
+        try:
+            if subindex is None:
+                return self.node.sdo[index].raw
+            else:
+                return self.node.sdo[index][subindex].raw
+        except Exception as e:
+            return False, f"FAILED TEST - READ: {hex(index)}.{subindex} isn't a Readable"
         
     def reset_value(self, index, subindex, value):
         if subindex is None:
@@ -541,50 +563,55 @@ class TestCANopen(unittest.TestCase):
             self.can.has_datatype(0x1000, DT=DataType.UNSIGNED32.value)
             self.can.is_ro(0x1000, value=b'\x00\x00')
         else:
-            assert False
+            assert False, f"FAILED TEST - EXISTS: {hex(0x1000)} mandatory object doesn't exists"
 
     def test_0x1001(self):
         if self.can.exists(0x1001):
             self.can.is_ro(0x1001, value=b'\x00\x00')
             self.can.has_datatype(0x1001, DT=DataType.UNSIGNED8.value)
         else:
-            assert False
+            assert False, f"FAILED TEST - EXISTS: {hex(0x1001)} mandatory object doesn't exists"
 
     def test_0x1018(self):
-        cnt = 0
+        actual_subindexes = 0
+        expected_datatype = DataType.UNSIGNED32.value
         if self.can.exists(0x1018):
-            self.can.is_ro(0x1018, 0, b'\x00\x00\x00')
-            self.can.has_datatype(0x1018, 0, DataType.UNSIGNED8.value)
+            if self.can.exists(0x1018, 0):
+                expected_subindexes = self.can.get_value(0x1018, 0)
+                self.can.is_ro(0x1018, 0, b'\x00\x00\x00')
+                self.can.has_datatype(0x1018, 0, DataType.UNSIGNED8.value)
+            else:
+                assert False, f"FAILED TEST - EXISTS: {hex(0x1018)}.{0} mandatory subindex doesn't exists"
 
             if self.can.exists(0x1018, 1):
                 self.can.is_ro(0x1018, 1, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1018, 1, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1018, 1, expected_datatype)
+                actual_subindexes += 1
             else:
-                assert False
+                assert False, f"FAILED TEST - EXISTS: {hex(0x1018)}.{1} mandatory subindex doesn't exists"
             
             if self.can.exists(0x1018, 2):
                 self.can.is_ro(0x1018, 2, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1018, 2, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1018, 2, expected_datatype)
+                actual_subindexes += 1
             else:
-                assert False
+                warnings.warn("0x1018.2 is missing", UserWarning)
             
             if self.can.exists(0x1018, 3):
                 self.can.is_ro(0x1018, 3, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1018, 3, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1018, 3, expected_datatype)
+                actual_subindexes += 1
             else:
-                assert False
+                warnings.warn("0x1018.3 is missing", UserWarning)
             
             if self.can.exists(0x1018, 4):
                 self.can.is_ro(0x1018, 4, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1018, 4, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1018, 4, expected_datatype)
+                actual_subindexes += 1
             else:
-                assert False
+                warnings.warn("0x1018.4 is missing", UserWarning)
 
-            check.equal(cnt, 4, "0x1018: number of subindexes is not the expected one (4)")
+            check.equal(actual_subindexes, expected_subindexes, f"FAILDE TEST - ARR SIZE: {hex(0x1018)} number of actual subindexes: {actual_subindexes} and expected subindexes: {expected_subindexes} don't match")
 
         else:
             assert False
@@ -594,7 +621,7 @@ class TestCANopen(unittest.TestCase):
             self.can.is_ro(0x1021, value=b'stringa')
             self.can.has_datatype(0x1021, DT=DataType.VISIBLE_STRING.value)
         else:
-            assert False
+            assert False, f"FAILED TEST - EXISTS: {hex(0x1021)} mandatory object doesn't exists"
 
     # start test for optional objects
 
@@ -605,39 +632,43 @@ class TestCANopen(unittest.TestCase):
         else:
             warnings.warn("0x1002 is missing", UserWarning)
 
-    # dovrebbe essere un 32 ma risulta essere un 8. nell'eds è segnato 32 ma non va.
-    # non è strutturato come array nell'eds
     def test_0x1003(self):
-        cnt = 0
-        if self.can.exists(0x1003, 0):
-            value = self.can.get_value(0x1003, 0)
-            self.can.is_rw(0x1003, 0, b'\x00')
-            self.can.has_datatype(0x1003, 0, DataType.UNSIGNED32.value)
-            try:
-                self.can.node.sdo[0x1003][0].raw = 1
-                assert False
-            except canopen.SdoAbortedError as error:
-                check.equal(error.code, 0x06090030)
+        actual_subindexes = 0
+        expected_datatype = DataType.UNSIGNED32.value
+        if self.can.exists(0x1003):
+            if self.can.exists(0x1003, 0):
+                expected_subindexes = self.can.get_value(0x1003, 0)
+                self.can.is_rw(0x1003, 0, b'\x00')
+                self.can.has_datatype(0x1003, 0, DataType.UNSIGNED8.value)
+                try:
+                    self.can.node.sdo[0x1003][0].raw = 1
+                    assert False
+                except canopen.SdoAbortedError as error:
+                    check.equal(error.code, 0x06090030)
+                self.can.reset_value(0x1003, 0, expected_subindexes)
+            else:
+                assert False, f"FAILED TEST - EXISTS: {hex(0x1003)}.{0} mandatory subindex doesn't exists"
 
-            self.can.reset_value(0x1003, None, value)
 
             if self.can.exists(0x1003, 1):
                 self.can.is_ro(0x1003, 1, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1003, 1, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1003, 1, expected_datatype)
+                actual_subindexes += 1
             else:
                 warnings.warn("0x1003.1 is missing", UserWarning)
 
             if self.can.exists(0x1003, 2):
                 self.can.is_ro(0x1003, 2, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1003, 2, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1003, 2, expected_datatype)
+                actual_subindexes += 1
             else:
                 warnings.warn("0x1003.2 is missing", UserWarning)
-        else:
-            assert False
 
-        check.equal(cnt, 2, "0x1003: number of subindexes is not the expected one (2)")
+            check.equal(actual_subindexes, expected_subindexes,  f"FAILDE TEST - ARR SIZE: {hex(0x1003)} number of actual subindexes: {actual_subindexes} and expected subindexes: {expected_subindexes} don't match")
+        else:
+            warnings.warn("0x1003 is missing", UserWarning)
+
+        
 
     def test_0x1004(self):
         if self.can.exists(0x1004):
@@ -730,66 +761,134 @@ class TestCANopen(unittest.TestCase):
             warnings.warn("0x100F is missing", UserWarning)
 
     def test_0x1010(self):  # error 80000020 l'index ritorna sempre errore
-        cnt = 0
+        actual_subindexes = 0
+        expected_datatype = DataType.UNSIGNED32.value
         if self.can.exists(0x1010):
-            self.can.is_ro(0x1010, 0, b'\x00\x00\x00\x00')
-            self.can.has_datatype(0x1010, 0, DataType.UNSIGNED8.value)
+            if self.can.exists(0x1010, 0):
+                expected_subindexes = self.can.get_value(0x1010, 0)
+                self.can.is_ro(0x1010, 0, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1010, 0, DataType.UNSIGNED8.value)
+            else:
+                assert False, f"FAILED TEST - EXISTS: {hex(0x1010)}.{0} mandatory object doesn't exists"
 
             if self.can.exists(0x1010, 1):
                 # self.can.is_readwrite(0x1010, 1, b'\x65\x76\x61\x73')
-                self.can.has_datatype(0x1010, 1, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1010, 1, expected_datatype)
+                actual_subindexes += 1
             else:
-                warnings.warn("0x1010.1 is missing", UserWarning)
+                assert False, f"FAILED TEST - EXISTS: {hex(0x1010)}.{1} mandatory object doesn't exists"
 
             if self.can.exists(0x1010, 2):
                 # self.can.is_readwrite(0x1010, 2, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1010, 2, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1010, 2, expected_datatype)
+                actual_subindexes += 1
             else:
                 warnings.warn("0x1010.2 is missing", UserWarning)
 
             if self.can.exists(0x1010, 3):
                 # self.can.is_readwrite(0x1010, 3, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1010, 3, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1010, 3, expected_datatype)
+                actual_subindexes += 1
             else:
                 warnings.warn("0x1010.3 is missing", UserWarning)
+            
+            if self.can.exists(0x1010, 4):
+                # self.can.is_readwrite(0x1010, 4, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1010, 4, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1010.4 is missing", UserWarning)
+            
+            if self.can.exists(0x1010, 5):
+                # self.can.is_readwrite(0x1010, 5, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1010, 5, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1010.5 is missing", UserWarning)
+
+            if self.can.exists(0x1010, 6):
+                # self.can.is_readwrite(0x1010, 6, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1010, 6, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1010.6 is missing", UserWarning)
+
+            if self.can.exists(0x1010, 7):
+                # self.can.is_readwrite(0x1010, 7, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1010, 7, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1010.7 is missing", UserWarning)
+
         else:
             warnings.warn("0x1010 is missing", UserWarning)
         
-        check.equal(cnt, 3, "0x1010: number of subindexes is not the expected one (3)")
+        check.equal(actual_subindexes, expected_subindexes,  f"FAILDE TEST - ARR SIZE: {hex(0x1010)} number of actual subindexes: {actual_subindexes} and expected subindexes: {expected_subindexes} don't match")
 
     def test_0x1011(self):  # error 80000020 l'index ritorna sempre errore
-        cnt = 0
+        actual_subindexes = 0
+        expected_datatype = DataType.UNSIGNED32.value
         if self.can.exists(0x1011):
-            # self.can.is_readonly(0x1011, 0, b'\x00')
-            self.can.has_datatype(0x1011, 0, DataType.UNSIGNED8.value)
+            if self.can.exists(0x1011, 0):
+                # self.can.is_readonly(0x1011, 0, b'\x00')
+                self.can.has_datatype(0x1011, 0, DataType.UNSIGNED8.value)
+                expected_subindexes = self.can.get_value(0x1011, 0)
+            else:
+                assert False, f"FAILED TEST - EXISTS: {hex(0x1011)}.{0} mandatory object doesn't exists"
 
             if self.can.exists(0x1011, 1):
                 # self.can.is_readwrite(0x1011, 1, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1011, 1, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1011, 1, expected_datatype)
+                actual_subindexes += 1
             else:
-                warnings.warn("0x1011.1 is missing", UserWarning)
+                assert False, f"FAILED TEST - EXISTS: {hex(0x1011)}.{1} mandatory object doesn't exists"
 
             if self.can.exists(0x1011, 2):
                 # self.can.is_readwrite(0x1011, 2, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1011, 2, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1011, 2, expected_datatype)
+                actual_subindexes += 1
             else:
                 warnings.warn("0x1011.2 is missing", UserWarning)
 
             if self.can.exists(0x1011, 3):
                 # self.can.is_readwrite(0x1011, 3, b'\x00\x00\x00\x00')
-                self.can.has_datatype(0x1011, 3, DataType.UNSIGNED32.value)
-                cnt += 1
+                self.can.has_datatype(0x1011, 3, expected_datatype)
+                actual_subindexes += 1
             else:
                 warnings.warn("0x1011.3 is missing", UserWarning)
-        else:
-            assert False
 
-        check.equal(cnt, 3, "0x1011: number of subindexes is not the expected one (3)")
+            if self.can.exists(0x1011, 4):
+                # self.can.is_readwrite(0x1011, 4, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1011, 4, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1011.4 is missing", UserWarning)
+
+            if self.can.exists(0x1011, 5):
+                # self.can.is_readwrite(0x1011, 5, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1011, 5, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1011.5 is missing", UserWarning)
+
+            if self.can.exists(0x1011, 6):
+                # self.can.is_readwrite(0x1011, 6, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1011, 6, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1011.6 is missing", UserWarning)
+
+            if self.can.exists(0x1011, 7):
+                # self.can.is_readwrite(0x1011, 7, b'\x00\x00\x00\x00')
+                self.can.has_datatype(0x1011, 7, expected_datatype)
+                actual_subindexes += 1
+            else:
+                warnings.warn("0x1011.7 is missing", UserWarning)
+            
+        else:
+            warnings.warn("0x1011 is missing", UserWarning)
+
+        check.equal(actual_subindexes, expected_subindexes,  f"FAILDE TEST - ARR SIZE: {hex(0x1011)} number of actual subindexes: {actual_subindexes} and expected subindexes: {expected_subindexes} don't match")
 
     def test_0x1012(self):
         if self.can.exists(0x1012):
@@ -858,7 +957,7 @@ class TestCANopen(unittest.TestCase):
     #error in the PDO mapping (0x1400+)
     #indexes from 2020-2025 give errors: 0602 0000. non esiste nel od ma poi exist in od passa(perchè crea una nuova variable) ma lo stesso c'è nel'eds
     def test_manufacturer_obj(self):
-        for item in list(filter(lambda key: key >= startIndex and key != 0x1F51 and key != 0x1F50 and key not in range(0x2020, 0x2026), self.can.node.object_dictionary.keys())):
+        for item in list(filter(lambda key: key >= startIndex and key != 0x1F51 and key != 0x1F50 and key not in range(0x2020, 0x2026) and key != 0x2027, self.can.node.object_dictionary.keys())):
             self.can.test_od(self.can.node.object_dictionary[item])
 
 

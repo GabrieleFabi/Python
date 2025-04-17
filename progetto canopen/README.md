@@ -11,6 +11,11 @@ Il file di test è `test_Inverter.py`
 python -m pytest test_Inverter.py
 ```
 
+### Avviare i test e generare il report html
+```sh
+python -m pytest --html=report.html --self-contained-html test_Inverter.py
+```
+
 ### Parametri opzionali
 
 ```sh
