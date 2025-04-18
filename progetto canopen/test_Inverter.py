@@ -1,4 +1,5 @@
 import os
+import platform
 import pytest
 import canopen
 import unittest
@@ -99,13 +100,22 @@ def config(request):
 
 
 def test_interface(config):
+    
+    if platform.system() == "Windows":
+        if interface != "kvaser":
+            warnings.warn(
+                f"Interface value is not kvaser, but {interface}", UserWarning)
 
-    if interface != "kvaser":
-        warnings.warn(
-            f"Interface value is not kvaser, but {interface}", UserWarning)
+        if channel != 0:
+            warnings.warn(f"Channel value is not 0, but {channel}", UserWarning)
 
-    if channel != 0:
-        warnings.warn(f"Channel value is not 0, but {channel}", UserWarning)
+    elif platform.system() == "Linux":
+        if interface != "socketcan":
+            warnings.warn(
+                f"Interface value is not socketcan, but {interface}", UserWarning)
+
+        if channel != 'can0':
+            warnings.warn(f"Channel value is not can0, but {channel}", UserWarning)
 
     if bitrate != 500_000:
         warnings.warn(

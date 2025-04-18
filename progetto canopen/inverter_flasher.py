@@ -5,9 +5,24 @@ import sys
 import serial.tools.list_ports
 import os
 import warnings
+import platform
+import shutil
 
-cmd_path = 'cd C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin'
-cmd_program = '.\\STM32_Programmer_CLI.exe -c port=SWD -w'
+# Determine the OS and set the paths dynamically
+if platform.system() == "Windows":
+    stm32_programmer_dir = os.environ.get("PROGRAMFILES", "C:\\Program Files") + "\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin"
+    cmd_program = ".\\STM32_Programmer_CLI.exe -c port=SWD -w"
+elif platform.system() == "Linux":
+    stm32_programmer_dir = "/usr/local/STMicroelectronics/STM32CubeProgrammer/bin"
+    cmd_program = "./STM32_Programmer_CLI -c port=SWD -w"
+else:
+    raise OSError("Unsupported operating system")
+
+# Verify the STM32CubeProgrammer path exists
+if not os.path.exists(stm32_programmer_dir):
+    raise FileNotFoundError(f"STM32CubeProgrammer not found in {stm32_programmer_dir}")
+
+cmd_path = f'cd {stm32_programmer_dir}'
 
 # Messages
 silent_message = bytearray([0x90, 0x01, 0x00, 0x91, 0x01])
@@ -45,7 +60,10 @@ def flash_master(firmware_master_path, serial_port):
         return False
     time.sleep(1)  # Wait for the end of selection
     try:
-        os.system(f' "{cmd_path} & {cmd_program} {firmware_master_path} 0x08000000"')  #Flashing
+        if platform.system() == "Windows":
+            os.system(f'"{cmd_path} & {cmd_program} {firmware_master_path} 0x08000000"')  # Windows
+        else:
+            os.system(f'cd {stm32_programmer_dir} && {cmd_program} "{firmware_master_path}" 0x08000000')  # Linux
         reboot_micros(serial_port)  # Restart after the flashing
         return True
     except Exception as e:
@@ -60,7 +78,10 @@ def flash_slave(firmware_slave_path, serial_port):
         return False
     time.sleep(1)  # Wait for the end of selection
     try:
-        os.system(f' "{cmd_path} & {cmd_program} {firmware_slave_path} 0x08000000"')  #Flashing
+        if platform.system() == "Windows":
+            os.system(f'"{cmd_path} & {cmd_program} {firmware_slave_path} 0x08000000"')  # Windows
+        else:
+            os.system(f'cd {stm32_programmer_dir} && {cmd_program} "{firmware_slave_path}" 0x08000000')  # Linux
         reboot_micros(serial_port)  # Restart after the flashing
         return True
     except Exception as e:
@@ -117,7 +138,7 @@ def reboot_micros(serial_port):
 def find_stlink_port():
     ports = serial.tools.list_ports.comports()
     for port in ports:
-        if "STMicroelectronics STLink Virtual COM Port" in port.description:
+        if "stlink" in port.description.lower():
             return port.device
     return None
 

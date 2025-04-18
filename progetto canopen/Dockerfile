@@ -8,3 +8,9 @@ RUN apt-get update && apt-get install -y python3 \
 
 COPY ./requirements.txt /var/app/requirements.txt
 RUN pip install -r /var/app/requirements.txt
+
+COPY ./ var/app/
+
+WORKDIR /var/app
+
+CMD /var/app

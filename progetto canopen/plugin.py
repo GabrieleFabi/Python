@@ -1,18 +1,37 @@
+import platform
+
 def pytest_addoption(parser):
-    parser.addoption(
-        "--interface",
-        action="store",
-        type=str,
-        default="kvaser",
-        help="insert the interface, default is setted to kvaser"
-    )
-    parser.addoption(
-        "--channel",
-        action="store",
-        type=int,
-        default=0,
-        help="insert the channel, default is setted to 0"
-    )
+    
+    if platform.system() == "Windows":
+        parser.addoption(
+            "--interface",
+            action="store",
+            type=str,
+            default="kvaser",
+            help="insert the interface, default is setted to kvaser"
+        )
+        parser.addoption(
+            "--channel",
+            action="store",
+            type=int,
+            default=0,
+            help="insert the channel, default is setted to 0"
+        )
+    elif platform.system() == "Linux":
+        parser.addoption(
+            "--interface",
+            action="store",
+            type=str,
+            default="socketcan",
+            help="insert the interface, default is setted to socketcan"
+        )
+        parser.addoption(
+            "--channel",
+            action="store",
+            type=str,
+            default='can0',
+            help="insert the channel, default is setted to 0"
+        )
     parser.addoption(
         "--bitrate",
         action="store",
