@@ -9,20 +9,63 @@ import platform
 import shutil
 
 # Determine the OS and set the paths dynamically
-if platform.system() == "Windows":
-    stm32_programmer_dir = os.environ.get("PROGRAMFILES", "C:\\Program Files") + "\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin"
-    cmd_program = ".\\STM32_Programmer_CLI.exe -c port=SWD -w"
-elif platform.system() == "Linux":
-    stm32_programmer_dir = "/usr/local/STMicroelectronics/STM32CubeProgrammer/bin"
-    cmd_program = "./STM32_Programmer_CLI -c port=SWD -w"
-else:
-    raise OSError("Unsupported operating system")
+configuration = {
+    "Windows": {
+        "stm32": {
+            "cmd": {
+                "master": ".\\STM32_Programmer_CLI.exe -c port=SWD -w",
+                "slave": ".\\STM32_Programmer_CLI.exe -c port=SWD -w"
+            },
+            "dir": os.environ.get("PROGRAMFILES", "C:\\Program Files") + "\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin"
+        },
+        "openocd": {
+            "cmd": {
+                "master": "",
+                "slave": ""
+            }
+        }
+    },
+    "Linux": {
+        "stm32": {
+            "cmd": {
+                "master": "./STM32_Programmer_CLI -c port=SWD -w",
+                "slave": "./STM32_Programmer_CLI -c port=SWD -w"
+            },
+            "dir": "/home/gabriele/STM32MPU/STM32CubeProgrammer/bin"
+        },
+        "openocd": {
+            "cmd": {
+                "master": "openocd -f interface/stlink.cfg -f target/stm32g4x.cfg -c \"init; reset halt; flash write_image erase {} 0x08000000; reset run; shutdown\"",
+                "slave": "openocd -f interface/stlink.cfg -f target/stm32h7x.cfg -c \"init; reset halt; flash write_image erase {} 0x08000000; reset run; shutdown\""
+            },
+            "dir": "."
+        }
+    }
+}
+
+chosen_tool = "stm32"
+
+
+def build_command(tool: str, firmware: str, is_master: bool = True) -> str:
+    system = platform.system()
+    cmd = configuration[system][tool]["cmd"]["master" if is_master else "slave"]
+    dir = configuration[system][tool]["dir"]
+
+    if system == "Windows":
+        if tool == "stm32":
+            return f'"cd {dir} & {cmd} {firmware} 0x08000000"'  # Windows
+    elif system == "Linux":
+        if tool == "stm32":
+            return f'cd {dir} && {cmd} "{firmware}" 0x08000000'  # Linux
+        elif tool == "openocd":
+            return cmd.format(firmware)
+
+    return ""
 
 # Verify the STM32CubeProgrammer path exists
-if not os.path.exists(stm32_programmer_dir):
-    raise FileNotFoundError(f"STM32CubeProgrammer not found in {stm32_programmer_dir}")
+# if not os.path.exists(stm32_programmer_dir):
+#   raise FileNotFoundError(f"STM32CubeProgrammer not found in {stm32_programmer_dir}")
 
-cmd_path = f'cd {stm32_programmer_dir}'
 
 # Messages
 silent_message = bytearray([0x90, 0x01, 0x00, 0x91, 0x01])
@@ -34,6 +77,8 @@ operation_succeed = bytearray([0x90, 0x03, 0x01, 0x91, 0x04])
 operation_failed = bytearray([0x90, 0x03, 0xFF, 0x91, 0x02])
 
 # Send commands to board and receive response
+
+
 def send_command_and_receive_result(command, serial_port):
     try:
         with serial.Serial(serial_port, 115200, timeout=2) as ser:
@@ -52,43 +97,26 @@ def send_command_and_receive_result(command, serial_port):
     except Exception as e:
         return False  # Errore
 
-# Flash firmware on master
-def flash_master(firmware_master_path, serial_port):
-    command = master_message
-    result = send_command_and_receive_result(command, serial_port)  # Select master
+
+def flash(firmware: str, serial_port, is_master: bool):
+    command = master_message if is_master else slave_message
+    result = send_command_and_receive_result(
+        command, serial_port)  # Select master
     if not result:
         return False
     time.sleep(1)  # Wait for the end of selection
     try:
-        if platform.system() == "Windows":
-            os.system(f'"{cmd_path} & {cmd_program} {firmware_master_path} 0x08000000"')  # Windows
-        else:
-            os.system(f'cd {stm32_programmer_dir} && {cmd_program} "{firmware_master_path}" 0x08000000')  # Linux
+        cmd = build_command(chosen_tool, firmware, is_master)
+        os.system(cmd)
         reboot_micros(serial_port)  # Restart after the flashing
         return True
     except Exception as e:
-        print(f"Error during flashing on master: {e}.")
-        return False
-    
-# Flash firmware on slave
-def flash_slave(firmware_slave_path, serial_port):
-    command = slave_message
-    result = send_command_and_receive_result(command, serial_port)  # Select master
-    if not result:
-        return False
-    time.sleep(1)  # Wait for the end of selection
-    try:
-        if platform.system() == "Windows":
-            os.system(f'"{cmd_path} & {cmd_program} {firmware_slave_path} 0x08000000"')  # Windows
-        else:
-            os.system(f'cd {stm32_programmer_dir} && {cmd_program} "{firmware_slave_path}" 0x08000000')  # Linux
-        reboot_micros(serial_port)  # Restart after the flashing
-        return True
-    except Exception as e:
-        print(f"Error during flashing on master: {e}.")
+        print(f"Error during flashing: {e}.")
         return False
 
 # Set inhibit
+
+
 def inhibit(serial_port):
     command = silent_message
     result = send_command_and_receive_result(command, serial_port)
@@ -99,6 +127,8 @@ def inhibit(serial_port):
     return True
 
 # Turn off inverter
+
+
 def turn_off(serial_port):
     power_off_command = power_off_message
     power_off = send_command_and_receive_result(power_off_command, serial_port)
@@ -111,6 +141,8 @@ def turn_off(serial_port):
         return False
 
 # Turn on inverter
+
+
 def turn_on(serial_port):
     power_on_command = power_on_message
     power_on = send_command_and_receive_result(power_on_command, serial_port)
@@ -123,6 +155,8 @@ def turn_on(serial_port):
         return False
 
 # Reboot inverter
+
+
 def reboot_micros(serial_port):
     if not turn_off(serial_port):
         return False
@@ -135,6 +169,8 @@ def reboot_micros(serial_port):
         return False
 
 # Find STLink port automatically
+
+
 def find_stlink_port():
     ports = serial.tools.list_ports.comports()
     for port in ports:
@@ -143,15 +179,25 @@ def find_stlink_port():
     return None
 
 # Parser of args
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Script to manage the flashing and reboot of the inverter.")
-    parser.add_argument("-i", "--inhibit", help="Set inhibition.", action="store_true")
-    parser.add_argument("-o", "--turnoff", help="Turn off inverter.", action="store_true")
-    parser.add_argument("-n", "--turnon", help="Turn on inverter.", action="store_true")
-    parser.add_argument("-r", "--reboot", help="Reboot inverter.", action="store_true")
-    parser.add_argument("-m", "--master", help="Path of master firmware.", type=str)
-    parser.add_argument("-s", "--slave", help="Path of slave firmware.", type=str)
-    parser.add_argument("-p", "--port", help="Serial port (e.g. COM5 or /dev/ttyUSB0). If not specified the port will be found automatically.", type=str)
+    parser = argparse.ArgumentParser(
+        description="Script to manage the flashing and reboot of the inverter.")
+    parser.add_argument("-i", "--inhibit",
+                        help="Set inhibition.", action="store_true")
+    parser.add_argument("-off", "--turnoff",
+                        help="Turn off inverter.", action="store_true")
+    parser.add_argument(
+        "-on", "--turnon", help="Turn on inverter.", action="store_true")
+    parser.add_argument(
+        "-r", "--reboot", help="Reboot inverter.", action="store_true")
+    parser.add_argument(
+        "-m", "--master", help="Path of master firmware.", type=str)
+    parser.add_argument(
+        "-s", "--slave", help="Path of slave firmware.", type=str)
+    parser.add_argument(
+        "-p", "--port", help="Serial port (e.g. COM5 or /dev/ttyUSB0). If not specified the port will be found automatically.", type=str)
 
     args = parser.parse_args()
 
@@ -173,7 +219,7 @@ def main():
         if not os.path.exists(firmware_master_path):
             warnings.warn("path del master non trovato")
             return False
-        result = flash_master(firmware_master_path, args.port)
+        result = flash(firmware_master_path, args.port, True)
         if not result:
             return False
 
@@ -183,7 +229,7 @@ def main():
         if not os.path.exists(firmware_slave_path):
             warnings.warn("path del master non trovato")
             return False
-        result = flash_slave(firmware_slave_path, args.port)
+        result = flash(firmware_slave_path, args.port, False)
         if not result:
             return False
 
@@ -191,7 +237,7 @@ def main():
     if args.inhibit:
         result = inhibit(args.port)
         if not result:
-            return False  #Errore
+            return False  # Errore
 
     # Spegnimento
     if args.turnoff:
@@ -199,7 +245,7 @@ def main():
         if not result:
             return False
 
-    #Accensione
+    # Accensione
     if args.turnon:
         result = turn_on(args.port)
         if not result:
@@ -214,6 +260,7 @@ def main():
 
     print("Successful operation.")
     return True  # Successo
+
 
 if __name__ == "__main__":
     success = main()
