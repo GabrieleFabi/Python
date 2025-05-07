@@ -20,3 +20,4 @@ services:
       - INSTANCE_NAME=Part-DB
       - ALLOW_ATTACHMENT_DOWNLOADS=0
       - USE_GRAVATAR=0
+      - PROVIDER_MOUSER_KEY=d27af7fc-2fc4-413a-96e0-f66e05f4d3c5
