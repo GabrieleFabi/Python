@@ -1,0 +1,17 @@
+version: '3.3'
+services:
+  mysql:
+    container_name: shared-mysql
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: partdb
+      MYSQL_USER: myuser
+      MYSQL_PASSWORD: mypassword
+    ports:
+      - "3306:3306"  # expose MySQL to local network
+    command: --default-authentication-plugin=mysql_native_password --log-bin-trust-function-creators=1
+
+    volumes:
+      - ./mysql-data:/var/lib/mysql
