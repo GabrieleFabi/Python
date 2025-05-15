@@ -1,0 +1,29 @@
+version: '3.3'
+services:
+  partdb:
+    container_name: partdb
+    image: jbtronics/part-db1:latest
+    ports:
+      - '8080:80'
+    volumes:
+      - ./uploads:/var/www/html/uploads
+      - ./public_media:/var/www/html/public/media
+      - ./db:/var/www/html/var/db
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=mysql://ProEl:Part-DB02A4@shared-mysql:3306/partdb
+      - APP_ENV=docker
+      - DB_AUTOMIGRATE=true
+      - DEFAULT_LANG=en
+      - DEFAULT_TIMEZONE=Europe/Berlin
+      - BASE_CURRENCY=EUR
+      - INSTANCE_NAME=Part-DB
+      - ALLOW_ATTACHMENT_DOWNLOADS=0
+      - USE_GRAVATAR=0
+      - PROVIDER_MOUSER_KEY=d27af7fc-2fc4-413a-96e0-f66e05f4d3c5
+    networks:
+      - partdb-net
+
+networks:
+  partdb-net:
+    external: true

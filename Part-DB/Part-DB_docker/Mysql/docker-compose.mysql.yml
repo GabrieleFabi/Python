@@ -1,0 +1,22 @@
+version: '3.3'
+services:
+  mysql:
+    container_name: shared-mysql
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ProElRoot02A4
+      MYSQL_DATABASE: partdb
+      MYSQL_USER: ProEl
+      MYSQL_PASSWORD: Part-DB02A4
+    ports:
+      - "3306:3306"
+    command: --default-authentication-plugin=mysql_native_password --log-bin-trust-function-creators=1
+    volumes:
+      - ./mysql-data:/var/lib/mysql
+    networks:
+      - partdb-net
+
+networks:
+  partdb-net:
+    external: true
